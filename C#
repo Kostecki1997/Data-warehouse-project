@@ -1,0 +1,739 @@
+using System;
+using System.Collections.Generic;
+using MongoDB.Driver;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Bson.IO;
+using System.Text;
+using System.Xml;
+using Newtonsoft.Json;
+
+
+public class DatabaseManager
+{
+    private readonly IMongoDatabase database;
+
+    public DatabaseManager(string connectionString, string databaseName)
+    {
+        var client = new MongoClient(connectionString);
+        database = client.GetDatabase(databaseName);
+    }
+    public List<Borrowing> GetCurrentBorrowings()
+    {
+        var borrowingCollection = database.GetCollection<Borrowing>("Borrowing");
+        var currentBorrowings = borrowingCollection.Find(b => b.ReturnDate == null).ToList();
+        return currentBorrowings;
+    }
+
+    public void AddBook(Book book)
+    {
+        var booksCollection = database.GetCollection<Book>("Books");
+
+        var lastBook = booksCollection.Find(new BsonDocument())
+                                      .SortByDescending(b => b.ID)
+                                      .FirstOrDefault();
+
+        book.ID = lastBook != null ? lastBook.ID + 1 : 1;
+
+        booksCollection.InsertOne(book);
+    }
+
+
+    public void AddReader(Reader reader)
+    {
+        var readersCollection = database.GetCollection<Reader>("Readers");
+
+        var lastReader = readersCollection.Find(new BsonDocument())
+                                          .SortByDescending(r => r.ID)
+                                          .FirstOrDefault();
+
+        reader.ID = lastReader != null ? lastReader.ID + 1 : 1;
+
+        readersCollection.InsertOne(reader);
+    }
+
+    public void AddBorrowing(Borrowing borrowing)
+    {
+        var borrowingCollection = database.GetCollection<Borrowing>("Borrowing");
+
+        var lastBorrowing = borrowingCollection.Find(new BsonDocument())
+                                               .SortByDescending(b => b.ID)
+                                               .FirstOrDefault();
+
+        borrowing.ID = lastBorrowing != null ? lastBorrowing.ID + 1 : 1;
+
+        // Ustawienie daty oddania książki na miesiąc do przodu od daty wypożyczenia
+        borrowing.ReturnDate = borrowing.BorrowDate.AddMonths(1);
+
+        borrowingCollection.InsertOne(borrowing);
+    }
+
+
+
+    public void DisplayBorrowings()
+    {
+        var borrowingCollection = database.GetCollection<Borrowing>("Borrowing");
+        var borrowings = borrowingCollection.Find(new BsonDocument()).ToList();
+
+        Console.WriteLine("\nLista wypożyczeń:");
+        foreach (var borrowing in borrowings)
+        {
+            var returnDateStr = borrowing.ReturnDate.HasValue
+                                ? borrowing.ReturnDate.Value.ToString("yyyy-MM-dd")
+                                : "brak";
+
+            Console.WriteLine($"ID Wypożyczenia: {borrowing.ID}, ID Czytelnika: {borrowing.ReaderID}, ID Książki: {borrowing.BookID}, Data wypożyczenia: {borrowing.BorrowDate.ToString("yyyy-MM-dd")}, Data zwrotu: {returnDateStr}");
+        }
+    }
+    public void DisplayBookById(int bookId)
+    {
+        var booksCollection = database.GetCollection<Book>("Books");
+        var book = booksCollection.Find(b => b.ID == bookId).FirstOrDefault();
+        if (book != null)
+        {
+            Console.WriteLine($"Tytuł: {book.Title}, Autor: {book.Author}, ID: {book.ID}");
+        }
+        else
+        {
+            Console.WriteLine("Książka o podanym ID nie istnieje.");
+        }
+    }
+
+    public void DisplayLast10Books()
+    {
+        var booksCollection = database.GetCollection<Book>("Books");
+        var books = booksCollection.Find(new BsonDocument()).SortByDescending(b => b.ID).Limit(10).ToList();
+
+        Console.WriteLine("\nOstatnie 10 książek:");
+        foreach (var book in books)
+        {
+            Console.WriteLine($"Tytuł: {book.Title}, Autor: {book.Author}, ID: {book.ID}");
+        }
+    }
+    public void DisplayReaders()
+    {
+        var readersCollection = database.GetCollection<Reader>("Readers");
+        var readers = readersCollection.Find(new BsonDocument()).ToList();
+
+        Console.WriteLine("\nLista czytelników:");
+        foreach (var reader in readers)
+        {
+            Console.WriteLine($"Imię: {reader.FirstName}, Nazwisko: {reader.LastName}, ID: {reader.ID}");
+        }
+    }
+    public void DisplayBorrowingById(int borrowingId)
+    {
+        var borrowingCollection = database.GetCollection<Borrowing>("Borrowing");
+        var borrowing = borrowingCollection.Find(b => b.ID == borrowingId).FirstOrDefault();
+        if (borrowing != null)
+        {
+            var returnDateStr = borrowing.ReturnDate.HasValue
+                                ? borrowing.ReturnDate.Value.ToString("yyyy-MM-dd")
+                                : "brak";
+            Console.WriteLine($"ID Wypożyczenia: {borrowing.ID}, ID Czytelnika: {borrowing.ReaderID}, ID Książki: {borrowing.BookID}, Data wypożyczenia: {borrowing.BorrowDate.ToString("yyyy-MM-dd")}, Data zwrotu: {returnDateStr}");
+        }
+        else
+        {
+            Console.WriteLine("Wypożyczenie o podanym ID nie istnieje.");
+        }
+    }
+    // ... (istniejące metody w DatabaseManager)
+
+    public void UpdateBook(int bookId, string newTitle, string newAuthor)
+    {
+        var booksCollection = database.GetCollection<Book>("Books");
+        var filter = Builders<Book>.Filter.Eq("ID", bookId);
+        var update = Builders<Book>.Update.Set("Title", newTitle).Set("Author", newAuthor);
+        booksCollection.UpdateOne(filter, update);
+    }
+
+    public void UpdateReader(int readerId, string newFirstName, string newLastName)
+    {
+        var readersCollection = database.GetCollection<Reader>("Readers");
+        var filter = Builders<Reader>.Filter.Eq("ID", readerId);
+        var update = Builders<Reader>.Update.Set("FirstName", newFirstName).Set("LastName", newLastName);
+        readersCollection.UpdateOne(filter, update);
+    }
+
+    public void UpdateBorrowing(int borrowingId, int newReaderId, string newBookId, DateTime newBorrowDate, DateTime? newReturnDate)
+    {
+        var borrowingCollection = database.GetCollection<Borrowing>("Borrowing");
+        var filter = Builders<Borrowing>.Filter.Eq("ID", borrowingId);
+        var update = Builders<Borrowing>.Update.Set("ReaderID", newReaderId).Set("BookID", newBookId).Set("BorrowDate", newBorrowDate).Set("ReturnDate", newReturnDate);
+        borrowingCollection.UpdateOne(filter, update);
+    }
+
+    public void DeleteBook(int bookId)
+    {
+        var booksCollection = database.GetCollection<Book>("Books");
+        var filter = Builders<Book>.Filter.Eq("ID", bookId);
+        booksCollection.DeleteOne(filter);
+    }
+
+    public void DeleteReader(int readerId)
+    {
+        var readersCollection = database.GetCollection<Reader>("Readers");
+        var filter = Builders<Reader>.Filter.Eq("ID", readerId);
+        readersCollection.DeleteOne(filter);
+    }
+
+    public void DeleteBorrowing(int borrowingId)
+    {
+        var borrowingCollection = database.GetCollection<Borrowing>("Borrowing");
+        var filter = Builders<Borrowing>.Filter.Eq("ID", borrowingId);
+        borrowingCollection.DeleteOne(filter);
+    }
+
+    public void DisplayLast10Borrowings()
+    {
+        var borrowingCollection = database.GetCollection<Borrowing>("Borrowing");
+        var borrowings = borrowingCollection.Find(new BsonDocument()).SortByDescending(b => b.ID).Limit(10).ToList();
+
+        Console.WriteLine("\nOstatnie 10 wypożyczeń:");
+        foreach (var borrowing in borrowings)
+        {
+            var returnDateStr = borrowing.ReturnDate.HasValue
+                                ? borrowing.ReturnDate.Value.ToString("yyyy-MM-dd")
+                                : "brak";
+            Console.WriteLine($"ID Wypożyczenia: {borrowing.ID}, ID Czytelnika: {borrowing.ReaderID}, ID Książki: {borrowing.BookID}, Data wypożyczenia: {borrowing.BorrowDate.ToString("yyyy-MM-dd")}, Data zwrotu: {returnDateStr}");
+        }
+    }
+
+    public void DisplayReaderById(int readerId)
+    {
+        var readersCollection = database.GetCollection<Reader>("Readers");
+        var reader = readersCollection.Find(r => r.ID == readerId).FirstOrDefault();
+        if (reader != null)
+        {
+            Console.WriteLine($"Imię: {reader.FirstName}, Nazwisko: {reader.LastName}, ID: {reader.ID}");
+        }
+        else
+        {
+            Console.WriteLine("Czytelnik o podanym ID nie istnieje.");
+        }
+    }
+
+    public void DisplayLast10Readers()
+    {
+        var readersCollection = database.GetCollection<Reader>("Readers");
+        var readers = readersCollection.Find(new BsonDocument()).SortByDescending(r => r.ID).Limit(10).ToList();
+
+        Console.WriteLine("\nOstatni 10 czytelników:");
+        foreach (var reader in readers)
+        {
+            Console.WriteLine($"Imię: {reader.FirstName}, Nazwisko: {reader.LastName}, ID: {reader.ID}");
+        }
+    }
+
+    public void DisplayBooks()
+    {
+        var booksCollection = database.GetCollection<Book>("Books");
+        var books = booksCollection.Find(new BsonDocument()).ToList();
+
+        Console.WriteLine("\nLista książek:");
+        foreach (var book in books)
+        {
+            Console.WriteLine($"Tytuł: {book.Title}, Autor: {book.Author}");
+        }
+    }
+}
+
+public class Borrowing
+{
+    [BsonId] // Dodane mapowanie dla MongoDB _id
+    [BsonRepresentation(BsonType.ObjectId)]
+    public ObjectId Id { get; set; }
+
+    public int ID { get; set; } // Automatycznie generowane
+    public int ReaderID { get; set; }
+    public string BookID { get; set; }
+    public DateTime BorrowDate { get; set; }
+    public DateTime? ReturnDate { get; set; } // Może być null
+}
+
+
+
+
+public class Book
+{
+    [BsonId]
+    [BsonRepresentation(BsonType.ObjectId)]
+    public ObjectId Id { get; set; } // odpowiada polu '_id' w MongoDB
+
+    public string Title { get; set; }
+    public string Author { get; set; }
+    public int ID { get; set; } // Automatycznie generowane ID
+}
+
+
+public class Reader
+{
+    [BsonId]
+    [BsonRepresentation(BsonType.ObjectId)]
+    public ObjectId Id { get; set; }
+
+    public string FirstName { get; set; }
+    public string LastName { get; set; }
+    public int ID { get; set; }
+    public List<Book> BorrowedBooks { get; set; } = new List<Book>();
+}
+
+class Program
+{
+    static DatabaseManager databaseManager;
+
+    static void Main(string[] args)
+    {
+        string connectionString = "mongodb+srv://skoszuta:$NAGSC5y9b!P4e5@cluster0.wetgk.mongodb.net/?retryWrites=true&w=majority";
+        string databaseName = "BazaDanych";
+
+        databaseManager = new DatabaseManager(connectionString, databaseName);
+
+        bool running = true;
+        while (running)
+        {
+            ShowMainMenu();
+            int choice = GetMenuChoice();
+            switch (choice)
+            {
+                case 1:
+                    DisplayData();
+                    break;
+                case 2:
+                    EnterData();
+                    break;
+                case 3:
+                    ModifyData();
+                    break;
+                case 4:
+                    ExportData();
+                    break;
+                case 5:
+                    running = false;
+                    break;
+                default:
+                    Console.WriteLine("Nieznana opcja. Spróbuj ponownie.");
+                    break;
+            }
+        }
+    }
+
+    static void ShowMainMenu()
+    {
+        Console.WriteLine("\nWitaj w systemie bibliotecznym! Wybierz dostępną opcję:");
+        Console.WriteLine("1. Wyświetl dane");
+        Console.WriteLine("2. Wprowadź dane");
+        Console.WriteLine("3. Modyfikuj dane");
+        Console.WriteLine("4. Eksportuj dane");
+        Console.WriteLine("5. Zakończ");
+    }
+
+    static int GetMenuChoice()
+    {
+        Console.Write("Wybierz opcję: ");
+        if (int.TryParse(Console.ReadLine(), out int choice))
+        {
+            return choice;
+        }
+        return -1;
+    }
+
+    static void EnterData()
+    {
+        Console.WriteLine("Wybierz opcję:");
+        Console.WriteLine("1. Dodaj książkę");
+        Console.WriteLine("2. Dodaj czytelnika");
+        Console.WriteLine("3. Dodaj wypożyczenie");
+        Console.Write("Wybierz opcję: ");
+        int choice = Convert.ToInt32(Console.ReadLine());
+
+        switch (choice)
+        {
+            case 1:
+                AddBook();
+                break;
+            case 2:
+                AddReader();
+                break;
+            case 3:
+                AddBorrowing();
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+
+    static void AddBook()
+    {
+        Console.WriteLine("Dodawanie nowej książki...");
+        Console.Write("Tytuł: ");
+        string title = Console.ReadLine();
+        Console.Write("Autor: ");
+        string author = Console.ReadLine();
+
+        Book newBook = new Book
+        {
+            Title = title,
+            Author = author
+        };
+
+        databaseManager.AddBook(newBook);
+        Console.WriteLine($"Dodano książkę: {title}, Autor: {author}");
+    }
+
+    static void AddReader()
+    {
+        Console.WriteLine("Dodawanie nowego czytelnika...");
+        Console.Write("Imię: ");
+        string firstName = Console.ReadLine();
+        Console.Write("Nazwisko: ");
+        string lastName = Console.ReadLine();
+
+        Reader newReader = new Reader
+        {
+            FirstName = firstName,
+            LastName = lastName
+        };
+
+        databaseManager.AddReader(newReader);
+        Console.WriteLine($"Dodano czytelnika: {firstName} {lastName}");
+    }
+
+    static void AddBorrowing()
+    {
+        Console.WriteLine("Dodawanie informacji o wypożyczeniu...");
+        Console.Write("ID Czytelnika: ");
+        int readerID = Convert.ToInt32(Console.ReadLine());
+        Console.Write("ID Książki: ");
+        string bookID = Console.ReadLine();
+        Console.Write("Data wypożyczenia (format: yyyy-MM-dd): ");
+        if (DateTime.TryParse(Console.ReadLine(), out DateTime borrowDate))
+        {
+            Borrowing borrowing = new Borrowing
+            {
+                ReaderID = readerID,
+                BookID = bookID,
+                BorrowDate = borrowDate
+            };
+
+            databaseManager.AddBorrowing(borrowing);
+            Console.WriteLine("Informacje o wypożyczeniu zostały dodane.");
+        }
+        else
+        {
+            Console.WriteLine("Błąd podczas parsowania daty. Spróbuj ponownie.");
+        }
+    }
+
+    static void DisplayData()
+    {
+        Console.WriteLine("\nWybierz kategorię do wyświetlenia:");
+        Console.WriteLine("1. Wyświetl książki");
+        Console.WriteLine("2. Wyświetl czytelników");
+        Console.WriteLine("3. Wyświetl wypożyczenia");
+        Console.Write("Wybierz opcję: ");
+        if (int.TryParse(Console.ReadLine(), out int choice))
+        {
+            switch (choice)
+            {
+                case 1:
+                    DisplayBooksMenu();
+                    break;
+                case 2:
+                    DisplayReadersMenu();
+                    break;
+                case 3:
+                    DisplayBorrowingsMenu();
+                    break;
+                default:
+                    Console.WriteLine("Nieznana opcja.");
+                    break;
+            }
+        }
+        else
+        {
+            Console.WriteLine("Nieprawidłowa opcja. Spróbuj ponownie.");
+        }
+    }
+
+    static void DisplayReadersMenu()
+    {
+        Console.WriteLine("\nWybierz opcję wyświetlania czytelników:");
+        Console.WriteLine("1. Wyświetl czytelnika po ID");
+        Console.WriteLine("2. Wyświetl wszystkich czytelników (od najwyższego ID do najniższego)");
+        Console.WriteLine("3. Wyświetl 10 ostatnich czytelników");
+        Console.Write("Wybierz opcję: ");
+        int readerChoice = Convert.ToInt32(Console.ReadLine());
+
+        switch (readerChoice)
+        {
+            case 1:
+                Console.Write("Podaj ID czytelnika: ");
+                int readerId = Convert.ToInt32(Console.ReadLine());
+                databaseManager.DisplayReaderById(readerId);
+                break;
+            case 2:
+                databaseManager.DisplayReaders();
+                break;
+            case 3:
+                databaseManager.DisplayLast10Readers();
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+
+    static void DisplayBorrowingsMenu()
+    {
+        Console.WriteLine("\nWybierz opcję wyświetlania wypożyczeń:");
+        Console.WriteLine("1. Wyświetl wypożyczenie po ID");
+        Console.WriteLine("2. Wyświetl wszystkie wypożyczenia (od najwyższego ID do najniższego)");
+        Console.WriteLine("3. Wyświetl 10 ostatnich wypożyczeń");
+        Console.Write("Wybierz opcję: ");
+        int borrowingChoice = Convert.ToInt32(Console.ReadLine());
+
+        switch (borrowingChoice)
+        {
+            case 1:
+                Console.Write("Podaj ID wypożyczenia: ");
+                int borrowingId = Convert.ToInt32(Console.ReadLine());
+                databaseManager.DisplayBorrowingById(borrowingId);
+                break;
+            case 2:
+                databaseManager.DisplayBorrowings();
+                break;
+            case 3:
+                databaseManager.DisplayLast10Borrowings();
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+    static void DisplayBooksMenu()
+    {
+        Console.WriteLine("\nWybierz opcję wyświetlania książek:");
+        Console.WriteLine("1. Wyświetl książkę po ID");
+        Console.WriteLine("2. Wyświetl wszystkie książki (od najwyższego ID do najniższego)");
+        Console.WriteLine("3. Wyświetl 10 ostatnich książek");
+        Console.Write("Wybierz opcję: ");
+        int bookChoice = Convert.ToInt32(Console.ReadLine());
+
+        switch (bookChoice)
+        {
+            case 1:
+                Console.Write("Podaj ID książki: ");
+                int bookId = Convert.ToInt32(Console.ReadLine());
+                databaseManager.DisplayBookById(bookId);
+                break;
+            case 2:
+                databaseManager.DisplayBooks();
+                break;
+            case 3:
+                databaseManager.DisplayLast10Books();
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+
+
+
+    static void ModifyData()
+    {
+        Console.WriteLine("Wybierz opcję:");
+        Console.WriteLine("1. Modyfikuj dane");
+        Console.WriteLine("2. Usuń dane");
+        Console.Write("Wybierz opcję: ");
+        int choice = Convert.ToInt32(Console.ReadLine());
+
+        switch (choice)
+        {
+            case 1:
+                ModifyDataMenu();
+                break;
+            case 2:
+                DeleteDataMenu();
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+
+    static void ModifyDataMenu()
+    {
+        Console.WriteLine("Wybierz kategorię do modyfikacji:");
+        Console.WriteLine("1. Modyfikuj książkę");
+        Console.WriteLine("2. Modyfikuj czytelnika");
+        Console.WriteLine("3. Modyfikuj wypożyczenie");
+        Console.Write("Wybierz opcję: ");
+        int choice = Convert.ToInt32(Console.ReadLine());
+
+        switch (choice)
+        {
+            case 1:
+                ModifyBook();
+                break;
+            case 2:
+                ModifyReader();
+                break;
+            case 3:
+                ModifyBorrowing();
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+
+    static void ModifyBook()
+    {
+        Console.Write("Podaj ID książki: ");
+        int bookId = Convert.ToInt32(Console.ReadLine());
+        Console.Write("Nowy tytuł: ");
+        string newTitle = Console.ReadLine();
+        Console.Write("Nowy autor: ");
+        string newAuthor = Console.ReadLine();
+
+        databaseManager.UpdateBook(bookId, newTitle, newAuthor);
+        Console.WriteLine("Książka została zmodyfikowana.");
+    }
+
+    static void ModifyReader()
+    {
+        Console.Write("Podaj ID czytelnika: ");
+        int readerId = Convert.ToInt32(Console.ReadLine());
+        Console.Write("Nowe imię: ");
+        string newFirstName = Console.ReadLine();
+        Console.Write("Nowe nazwisko: ");
+        string newLastName = Console.ReadLine();
+
+        databaseManager.UpdateReader(readerId, newFirstName, newLastName);
+        Console.WriteLine("Czytelnik został zmodyfikowany.");
+    }
+
+    static void ModifyBorrowing()
+    {
+        Console.Write("Podaj ID wypożyczenia: ");
+        int borrowingId = Convert.ToInt32(Console.ReadLine());
+        Console.Write("Nowe ID czytelnika: ");
+        int newReaderId = Convert.ToInt32(Console.ReadLine());
+        Console.Write("Nowe ID książki: ");
+        string newBookId = Console.ReadLine();
+        Console.Write("Nowa data wypożyczenia (format: yyyy-MM-dd): ");
+        DateTime newBorrowDate = DateTime.Parse(Console.ReadLine());
+        Console.Write("Nowa data zwrotu (format: yyyy-MM-dd) lub pozostaw puste: ");
+        string newReturnDateInput = Console.ReadLine();
+        DateTime? newReturnDate = string.IsNullOrWhiteSpace(newReturnDateInput) ? (DateTime?)null : DateTime.Parse(newReturnDateInput);
+
+        databaseManager.UpdateBorrowing(borrowingId, newReaderId, newBookId, newBorrowDate, newReturnDate);
+        Console.WriteLine("Wypożyczenie zostało zmodyfikowane.");
+    }
+
+    static void DeleteDataMenu()
+    {
+        Console.WriteLine("Wybierz kategorię do usunięcia:");
+        Console.WriteLine("1. Usuń książkę");
+        Console.WriteLine("2. Usuń czytelnika");
+        Console.WriteLine("3. Usuń wypożyczenie");
+        Console.Write("Wybierz opcję: ");
+        int choice = Convert.ToInt32(Console.ReadLine());
+
+        switch (choice)
+        {
+            case 1:
+                DeleteBook();
+                break;
+            case 2:
+                DeleteReader();
+                break;
+            case 3:
+                DeleteBorrowing();
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+
+    static void DeleteBook()
+    {
+        Console.Write("Podaj ID książki do usunięcia: ");
+        int bookId = Convert.ToInt32(Console.ReadLine());
+        databaseManager.DeleteBook(bookId);
+        Console.WriteLine("Książka została usunięta.");
+    }
+
+    static void DeleteReader()
+    {
+        Console.Write("Podaj ID czytelnika do usunięcia: ");
+        int readerId = Convert.ToInt32(Console.ReadLine());
+        databaseManager.DeleteReader(readerId);
+        Console.WriteLine("Czytelnik został usunięty.");
+    }
+
+    static void DeleteBorrowing()
+    {
+        Console.Write("Podaj ID wypożyczenia do usunięcia: ");
+        int borrowingId = Convert.ToInt32(Console.ReadLine());
+        databaseManager.DeleteBorrowing(borrowingId);
+        Console.WriteLine("Wypożyczenie zostało usunięte.");
+    }
+    static void ExportData()
+    {
+        Console.WriteLine("Wybierz format eksportu:");
+        Console.WriteLine("1. JSON");
+        Console.WriteLine("2. CSV");
+        Console.Write("Wybierz opcję: ");
+        int choice = Convert.ToInt32(Console.ReadLine());
+
+        var currentBorrowings = databaseManager.GetCurrentBorrowings();
+
+        switch (choice)
+        {
+            case 1:
+                ExportToJson(currentBorrowings);
+                break;
+            case 2:
+                ExportToCsv(currentBorrowings);
+                break;
+            default:
+                Console.WriteLine("Nieznana opcja.");
+                break;
+        }
+    }
+
+    static void ExportToJson(List<Borrowing> borrowings)
+    {
+        string json = Newtonsoft.Json.JsonConvert.SerializeObject(borrowings, Newtonsoft.Json.Formatting.Indented);
+
+        // Ścieżka, gdzie chcesz zapisać plik
+        string filePath = @"C:\Users\48783\Desktop\studia\Praca\currentBorrowings.json";
+
+        // Zapisanie pliku JSON do określonej ścieżki
+        File.WriteAllText(filePath, json);
+
+        Console.WriteLine($"Dane zostały wyeksportowane do pliku {filePath}");
+    }
+
+
+    static void ExportToCsv(List<Borrowing> borrowings)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("ID,ReaderID,BookID,BorrowDate,ReturnDate");
+
+        foreach (var borrowing in borrowings)
+        {
+            sb.AppendLine($"{borrowing.ID},{borrowing.ReaderID},{borrowing.BookID},{borrowing.BorrowDate.ToString("yyyy-MM-dd")},{borrowing.ReturnDate?.ToString("yyyy-MM-dd") ?? string.Empty}");
+        }
+
+        File.WriteAllText("currentBorrowings.csv", sb.ToString());
+        Console.WriteLine("Dane zostały wyeksportowane do pliku currentBorrowings.csv");
+    }
+
+}
